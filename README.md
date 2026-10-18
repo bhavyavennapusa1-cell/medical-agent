@@ -31,5 +31,3 @@ streamlit run app.py
 | config.py | Model names and settings |
 | scripts/ | Key check, sample data, smoke test |
 | tests/ | Unit tests |
-
-Never commit `.env`.
