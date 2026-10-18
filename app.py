@@ -11,6 +11,7 @@ import logging
 from datetime import datetime
 from io import BytesIO
 from pathlib import Path
+from urllib.parse import quote
 
 import pandas as pd
 import plotly.express as px
@@ -27,7 +28,7 @@ ROOT = Path(__file__).resolve().parent
 load_dotenv(ROOT / ".env")
 import config  # noqa: E402
 
-st.set_page_config(page_title="Medimind", page_icon="🩺", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="Medimind", page_icon=":material/medical_services:", layout="wide", initial_sidebar_state="expanded")
 log = logging.getLogger("medimind")
 
 # ----------------------------------------------------------------------------
@@ -233,25 +234,143 @@ def build_summary_pdf(summary, pid, trend_getter):
 
 
 # ==== UI ====================================================================
-st.markdown("""
-<style>
-.block-container{max-width:1180px;padding-top:1.2rem}
-.mm-head{display:flex;align-items:center;gap:12px;margin-bottom:2px}
-.mm-logo{width:38px;height:38px;border-radius:10px;background:#176b87;color:white;
-display:flex;align-items:center;justify-content:center;font-size:20px}
-.mm-title{font-size:28px;font-weight:750}.mm-sub{color:#66757d;font-size:14px;margin:0 0 15px 50px}
-.mm-disc{border:1px solid #f0d7a4;background:#fffaf0;color:#76551b;border-radius:8px;
-padding:8px 11px;font-size:12px;margin-bottom:16px}
-.mm-patient{background:#e9f5f8;border:1px solid #cfe7ed;border-radius:10px;padding:12px 14px;margin-bottom:14px;color:#17323d}
-.mm-name{font-weight:700}.mm-meta{color:#4d5f67;font-size:13px;margin-top:3px}
+# Colours follow the Streamlit theme (menu -> Settings -> Theme: Light / Dark / System).
+def _theme_type():
+    try:
+        return "dark" if st.context.theme.type == "dark" else "light"
+    except Exception:  # noqa: BLE001  (older Streamlit)
+        return "light"
+
+
+IS_DARK = _theme_type() == "dark"
+PALETTE = {
+    "light": dict(bg="#F3F7F7", surface="#FFFFFF", surface2="#E9F1F1", ink="#12262B", muted="#5A6F75",
+                  line="#D5E2E2", primary="#0E7C7B", primary2="#16A398", soft="#DDF1EF", on_primary="#FFFFFF",
+                  hero1="#FFFFFF", hero2="#DDF0EE", warn_bg="#FFF6E0", warn_line="#EBD395", warn_ink="#6E4D00",
+                  shadow="0 1px 2px rgba(18,38,43,.06), 0 10px 28px rgba(18,38,43,.07)"),
+    "dark": dict(bg="#0B1416", surface="#111E21", surface2="#172A2D", ink="#E4EFEE", muted="#93ABAF",
+                 line="#223539", primary="#3CC9BE", primary2="#1FA79D", soft="#12393A", on_primary="#06201E",
+                 hero1="#122528", hero2="#0F3436", warn_bg="#2A2210", warn_line="#52411A", warn_ink="#F0D18A",
+                 shadow="0 1px 2px rgba(0,0,0,.45), 0 12px 32px rgba(0,0,0,.35)"),
+}
+PAL = PALETTE["dark" if IS_DARK else "light"]
+ROOT_VARS = ":root{" + "".join(f"--mm-{k.replace('_', '-')}:{v};" for k, v in PAL.items()) + "}"
+
+UI_CSS = """
+@import url('https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=Newsreader:opsz,wght@6..72,500;6..72,600&display=swap');
+.stApp{background:var(--mm-bg);color:var(--mm-ink)}
+.stApp,.stApp button,.stApp input,.stApp textarea{font-family:'Figtree',system-ui,-apple-system,'Segoe UI',sans-serif}
+[data-testid="stHeader"]{background:transparent}
+.block-container{max-width:1180px;padding-top:1.4rem;padding-bottom:3rem}
+h1,h2,h3,h4{font-family:'Newsreader',Georgia,serif!important;letter-spacing:-.01em;color:var(--mm-ink)}
+h4{margin-top:1.1rem!important}
+
+/* ---- hero ---- */
+.mm-hero{position:relative;overflow:hidden;display:flex;align-items:center;gap:16px;padding:20px 24px;
+border-radius:22px;background:linear-gradient(120deg,var(--mm-hero1),var(--mm-hero2));
+border:1px solid var(--mm-line);box-shadow:var(--mm-shadow);margin-bottom:14px}
+.mm-logo{flex:none;width:54px;height:54px;border-radius:17px;display:grid;place-items:center;
+background:linear-gradient(135deg,var(--mm-primary2),var(--mm-primary));box-shadow:0 8px 18px rgba(14,124,123,.32)}
+.mm-logo svg{width:30px;height:30px;stroke:var(--mm-on-primary)}
+.mm-htext{position:relative;z-index:1}
+.mm-title{font-family:'Newsreader',Georgia,serif;font-size:36px;font-weight:600;line-height:1.05;color:var(--mm-ink)}
+.mm-sub{color:var(--mm-muted);font-size:15px;margin-top:5px}
+.mm-ecg{position:absolute;right:-4px;top:50%;transform:translateY(-50%);width:52%;height:70px;opacity:.38;
+fill:none;stroke:var(--mm-primary);stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+
+/* ---- disclaimer ---- */
+.mm-disc{display:flex;align-items:flex-start;gap:10px;border:1px solid var(--mm-warn-line);background:var(--mm-warn-bg);
+color:var(--mm-warn-ink);border-radius:14px;padding:10px 14px;font-size:13px;line-height:1.45;margin-bottom:18px}
+.mm-disc svg{flex:none;width:18px;height:18px;margin-top:1px;fill:none;stroke:currentColor;stroke-width:2;
+stroke-linecap:round;stroke-linejoin:round}
+
+/* ---- patient card ---- */
+.mm-patient{display:flex;align-items:center;gap:14px;background:var(--mm-surface);border:1px solid var(--mm-line);
+border-left:5px solid var(--mm-primary);border-radius:16px;padding:14px 18px;margin:6px 0 10px;box-shadow:var(--mm-shadow)}
+.mm-avatar{flex:none;width:44px;height:44px;border-radius:50%;display:grid;place-items:center;background:var(--mm-soft)}
+.mm-avatar svg{width:24px;height:24px;fill:none;stroke:var(--mm-primary);stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.mm-name{font-weight:700;font-size:17px;color:var(--mm-ink)}
+.mm-meta{color:var(--mm-muted);font-size:13.5px;margin-top:2px}
+
+/* ---- sidebar ---- */
+[data-testid="stSidebar"]{background:var(--mm-surface);border-right:1px solid var(--mm-line)}
+[data-testid="stSidebar"] h3{font-size:1.1rem;margin:.1rem 0 .5rem;padding:0}
+[data-testid="stSidebar"] hr{margin:1.1rem 0;border-color:var(--mm-line)}
+[data-testid="stFileUploaderDropzone"]{border:1.5px dashed var(--mm-line);border-radius:14px;background:var(--mm-surface2)}
+[data-testid="stFileUploaderDropzone"]:hover{border-color:var(--mm-primary)}
+
+/* ---- tabs ---- */
+[role="tablist"]{gap:4px;background:var(--mm-surface2);padding:5px;border-radius:15px;width:fit-content;max-width:100%;
+border:0!important;box-shadow:none!important}
+[role="tablist"] [role="tab"]{height:42px;padding:0 18px;border-radius:11px;color:var(--mm-muted);font-weight:600;background:transparent}
+[role="tablist"] [role="tab"] p{font-weight:600}
+[role="tablist"] [role="tab"][aria-selected="true"]{background:var(--mm-surface);color:var(--mm-primary);box-shadow:0 1px 3px rgba(0,0,0,.16)}
+[role="tablist"] [role="tab"][aria-selected="true"]>div+div{display:none}
+[role="tablist"] [role="tab"]:hover{color:var(--mm-primary)}
+[role="tabpanel"]{padding-top:1.2rem}
+
+/* ---- buttons ---- */
+.stButton>button,.stDownloadButton>button{border-radius:12px;border:1px solid var(--mm-line);background:var(--mm-surface);
+color:var(--mm-ink);font-weight:600;min-height:2.6rem;transition:border-color .15s,color .15s,background .15s}
+.stButton>button:hover,.stDownloadButton>button:hover{border-color:var(--mm-primary);color:var(--mm-primary);background:var(--mm-soft)}
+.stButton>button:focus-visible,.stDownloadButton>button:focus-visible{outline:2px solid var(--mm-primary);outline-offset:2px}
+[data-testid="stBaseButton-primary"]{background:linear-gradient(135deg,var(--mm-primary2),var(--mm-primary))!important;
+color:var(--mm-on-primary)!important;border:0!important;box-shadow:0 6px 16px rgba(14,124,123,.28)}
+[data-testid="stBaseButton-primary"]:hover{filter:brightness(1.07)}
+[class*="st-key-sugg_"] button{justify-content:flex-start;text-align:left;border-radius:14px;padding:.75rem 1rem;font-weight:500}
+
+/* ---- chat ---- */
+[data-testid="stChatMessage"]{background:var(--mm-surface);border:1px solid var(--mm-line);border-radius:18px;
+padding:14px 18px;box-shadow:var(--mm-shadow);margin-bottom:.6rem}
+[data-testid="stChatInput"]{border-radius:18px;border:1px solid var(--mm-line);background:var(--mm-surface);box-shadow:var(--mm-shadow)}
+[data-testid="stChatInput"]:focus-within{border-color:var(--mm-primary)}
+
+/* ---- misc ---- */
+[data-testid="stExpander"] details{border:1px solid var(--mm-line);border-radius:14px;background:var(--mm-surface)}
+[data-testid="stExpander"] summary{font-weight:600}
+[data-testid="stAlert"]{border-radius:14px}
+[data-testid="stDataFrame"]{border:1px solid var(--mm-line);border-radius:14px;overflow:hidden}
+[data-testid="stPlotlyChart"]{background:var(--mm-surface);border:1px solid var(--mm-line);border-radius:16px;
+padding:8px;box-shadow:var(--mm-shadow)}
+hr{border-color:var(--mm-line)}
+
 @media(max-width:768px){
 .block-container{padding:.8rem .7rem 2rem}
-.mm-title{font-size:24px}.mm-sub{margin-left:0}
+.mm-hero{padding:16px}.mm-title{font-size:27px}.mm-logo{width:46px;height:46px}.mm-ecg{width:80%;opacity:.2}
 [data-testid="stHorizontalBlock"]>div{min-width:100%!important;width:100%!important}
 .stButton>button{width:100%}
 }
-</style>
-""", unsafe_allow_html=True)
+@media(prefers-reduced-motion:reduce){*{transition:none!important}}
+"""
+st.markdown(f"<style>{ROOT_VARS}{UI_CSS}</style>", unsafe_allow_html=True)
+
+ICON_SVG = {
+    "pulse": '<svg viewBox="0 0 24 24" fill="none" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">'
+             '<path d="M3 12h4l2-6 4 12 2-6h6"/></svg>',
+    "info": '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>',
+    "person": '<svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>',
+    "ecg": '<svg class="mm-ecg" viewBox="0 0 400 70" preserveAspectRatio="none">'
+           '<path d="M0 36h96l10-24 14 50 14-40 8 14h40l10-20 14 42 12-22h182"/></svg>',
+}
+
+
+def _avatar_uri(kind):
+    head = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">'
+    if kind == "assistant":
+        body = (f'<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="{PAL["primary2"]}"/>'
+                f'<stop offset="1" stop-color="{PAL["primary"]}"/></linearGradient></defs>'
+                f'<rect width="40" height="40" rx="13" fill="url(#g)"/>'
+                f'<path d="M8 21h6l3-8 5 15 3-9 2 2h5" fill="none" stroke="{PAL["on_primary"]}" stroke-width="2.7" '
+                f'stroke-linecap="round" stroke-linejoin="round"/>')
+    else:
+        body = (f'<rect width="40" height="40" rx="13" fill="{PAL["soft"]}"/>'
+                f'<circle cx="20" cy="15" r="5.5" fill="none" stroke="{PAL["primary"]}" stroke-width="2.4"/>'
+                f'<path d="M9.5 32c1.2-5.5 5.2-8 10.5-8s9.3 2.5 10.5 8" fill="none" stroke="{PAL["primary"]}" '
+                f'stroke-width="2.4" stroke-linecap="round"/>')
+    return "data:image/svg+xml;charset=utf-8," + quote(head + body + "</svg>")
+
+
+CHAT_AVATAR = {"user": _avatar_uri("user"), "assistant": _avatar_uri("assistant")}
 
 
 def data_loaded():
@@ -293,10 +412,10 @@ def add_files(named_bytes, replace=False):
             commit_sources(sources)
         return True
     except IngestError as exc:
-        st.sidebar.error(f"❌ {exc}")
+        st.sidebar.error(f"{exc}", icon=":material/error:")
     except Exception:  # noqa: BLE001
         log.exception("Loading files failed")
-        st.sidebar.error("❌ Could not load the data. Check the file and try again.")
+        st.sidebar.error("Could not load the data. Check the file and try again.", icon=":material/error:")
     return False
 
 
@@ -305,11 +424,11 @@ def load_demo():
     for name in (config.PATIENT_FILE, config.KB_FILE):
         path = ROOT / config.DATA_DIR / name
         if not path.exists():
-            st.sidebar.error(f"Demo file missing: {path.name}")
+            st.sidebar.error(f"Demo file missing: {path.name}", icon=":material/error:")
             return
         files.append((name, path.read_bytes()))
     if add_files(files, replace=True):
-        st.sidebar.success("Demo data loaded (3 patients + knowledge base).")
+        st.sidebar.success("Demo data loaded (3 patients + knowledge base).", icon=":material/check_circle:")
 
 
 def report_patient_list():
@@ -341,7 +460,7 @@ def trend_for(pid, test):
 def display_sources(sources):
     if not sources:
         return
-    with st.expander("📚 Sources"):
+    with st.expander("Sources", icon=":material/menu_book:"):
         for i, s in enumerate(sources, 1):
             st.markdown(f"**{i}. {txt(s.get('source'), 'Unknown')}** — page {s.get('page') or 'N/A'}"
                         f" — section: {s.get('section') or 'N/A'} — patient: {s.get('patient_id') or 'general'}")
@@ -351,15 +470,16 @@ def display_sources(sources):
 
 def display_summary(s, pid):
     p = s.get("patient") or {}
-    st.markdown(f'<div class="mm-patient"><div class="mm-name">{esc(txt(p.get("name"), "Patient"))}</div>'
+    st.markdown(f'<div class="mm-patient"><div class="mm-avatar">{ICON_SVG["person"]}</div><div>'
+                f'<div class="mm-name">{esc(txt(p.get("name"), "Patient"))}</div>'
                 f'<div class="mm-meta">Patient ID: {esc(txt(p.get("id", pid)))} · Age: {esc(txt(p.get("age"), "n/a"))}'
-                f'</div></div>', unsafe_allow_html=True)
+                f'</div></div></div>', unsafe_allow_html=True)
 
-    st.markdown("#### 🩺 Diagnosis")
+    st.markdown("#### :material/stethoscope: Diagnosis")
     for item in as_list(s.get("diagnosis")) or ["No diagnosis found."]:
         st.write(f"• {item}")
 
-    st.markdown("#### 🔎 Key findings")
+    st.markdown("#### :material/biotech: Key findings")
     rows = []
     for f in as_list(s.get("key_findings")):
         if isinstance(f, dict):
@@ -371,13 +491,13 @@ def display_summary(s, pid):
     else:
         st.caption("No key findings in the record.")
 
-    for title, key, empty in [("⚠️ Abnormalities", "abnormalities", "None flagged."),
-                              ("🛡️ Safety notes", "safety_notes", "No safety notes.")]:
+    for title, key, empty in [(":material/warning: Abnormalities", "abnormalities", "None flagged."),
+                              (":material/shield: Safety notes", "safety_notes", "No safety notes.")]:
         st.markdown(f"#### {title}")
         for v in as_list(s.get(key)) or [empty]:
             st.write(f"• {txt(v)}")
 
-    st.markdown("#### 💊 Medications")
+    st.markdown("#### :material/medication: Medications")
     meds = as_list(s.get("medications"))
     if meds:
         st.dataframe(pd.DataFrame([
@@ -388,19 +508,20 @@ def display_summary(s, pid):
         st.caption("No medications found.")
 
     if s.get("follow_up"):
-        st.markdown("#### 📅 Follow-up")
+        st.markdown("#### :material/event: Follow-up")
         st.write(txt(s.get("follow_up")))
     if as_list(s.get("not_found")):
-        st.markdown("#### ❓ Not found in the record")
+        st.markdown("#### :material/help: Not found in the record")
         for v in as_list(s.get("not_found")):
             st.write(f"• {txt(v)}")
     display_sources(as_list(s.get("sources")))
 
 
 # ---- header ----------------------------------------------------------------
-st.markdown('<div class="mm-head"><div class="mm-logo">✚</div><div class="mm-title">Medimind</div></div>'
-            '<div class="mm-sub">AI-powered Medical Report Assistant</div>', unsafe_allow_html=True)
-st.markdown(f'<div class="mm-disc">{esc(config.DISCLAIMER)}</div>', unsafe_allow_html=True)
+st.markdown(f'<div class="mm-hero">{ICON_SVG["ecg"]}<div class="mm-logo">{ICON_SVG["pulse"]}</div>'
+            '<div class="mm-htext"><div class="mm-title">Medimind</div>'
+            '<div class="mm-sub">AI-powered Medical Report Assistant</div></div></div>', unsafe_allow_html=True)
+st.markdown(f'<div class="mm-disc">{ICON_SVG["info"]}<span>{esc(config.DISCLAIMER)}</span></div>', unsafe_allow_html=True)
 if not config.credentials_configured():
     st.error(config.credentials_hint() + " The assistant cannot call Gemini until this is configured.")
 if MODULE_ERRORS:
@@ -408,12 +529,12 @@ if MODULE_ERRORS:
 
 # ---- sidebar ---------------------------------------------------------------
 with st.sidebar:
-    st.markdown("### 📂 Data")
-    if st.button("🧪 Load demo data", key="btn_demo", use_container_width=True):
+    st.markdown("### :material/folder_open: Data")
+    if st.button("Load demo data", key="btn_demo", icon=":material/science:", use_container_width=True):
         load_demo()
     uploads = st.file_uploader("Upload medical reports (PDF, CSV or Excel)", type=["pdf", "csv", "xlsx", "xls"],
                                accept_multiple_files=True, key="uploader")
-    if st.button("➕ Add uploaded file(s)", key="btn_add", use_container_width=True, disabled=not uploads):
+    if st.button("Add uploaded file(s)", key="btn_add", icon=":material/add_circle:", use_container_width=True, disabled=not uploads):
         if add_files([(f.name, f.getvalue()) for f in uploads]):
             st.success("Added: " + ", ".join(f.name for f in uploads))
     if st.session_state.sources:
@@ -422,7 +543,7 @@ with st.sidebar:
             st.caption("• " + name)
 
     st.divider()
-    st.markdown("### 👤 Patient")
+    st.markdown("### :material/person: Patient")
     patients = list_patients(st.session_state.df) if st.session_state.df is not None else []
     labels = {"": "All patients"}
     labels.update({p["patient_id"]: f"{p['patient_name']} ({p['patient_id']})" for p in patients})
@@ -436,17 +557,17 @@ with st.sidebar:
         st.caption("Load data to select a patient.")
 
     st.divider()
-    st.markdown("### ⚙️ Actions")
+    st.markdown("### :material/tune: Actions")
     c_a, c_b = st.columns(2)
-    if c_a.button("🗑️ Clear chat", key="btn_clear", use_container_width=True):
+    if c_a.button("Clear chat", key="btn_clear", icon=":material/delete:", use_container_width=True):
         st.session_state.messages = []
         st.rerun()
-    if c_b.button("♻️ Reset data", key="btn_reset", use_container_width=True):
+    if c_b.button("Reset data", key="btn_reset", icon=":material/restart_alt:", use_container_width=True):
         for k, v in _DEFAULTS.items():
             st.session_state[k] = v.copy() if isinstance(v, (dict, list)) else v
         st.rerun()
 
-tab_chat, tab_summary, tab_trends = st.tabs(["💬 Chat", "📄 Summary", "📈 Trends"])
+tab_chat, tab_summary, tab_trends = st.tabs([":material/forum: Chat", ":material/description: Summary", ":material/monitoring: Trends"])
 
 # ---- chat ------------------------------------------------------------------
 with tab_chat:
@@ -456,11 +577,11 @@ with tab_chat:
         st.info("Click **Load demo data** in the sidebar, or upload a report, to start.")
     cols = st.columns(2)
     for i, q in enumerate(SUGGESTED):
-        if cols[i % 2].button(q, key=f"sugg_{i}", use_container_width=True):
+        if cols[i % 2].button(q, key=f"sugg_{i}", icon=":material/auto_awesome:", use_container_width=True):
             st.session_state.pending_question = q
 
     for msg in st.session_state.messages:
-        with st.chat_message(msg["role"]):
+        with st.chat_message(msg["role"], avatar=CHAT_AVATAR[msg["role"]]):
             st.markdown(msg["content"])
             if msg["role"] == "assistant":
                 display_sources(msg.get("sources"))
@@ -472,11 +593,11 @@ with tab_chat:
             st.warning("Load data first (sidebar).")
         else:
             history = [{"role": m["role"], "content": m["content"]} for m in st.session_state.messages]
-            with st.chat_message("user"):
+            with st.chat_message("user", avatar=CHAT_AVATAR["user"]):
                 st.markdown(prompt)
-            with st.chat_message("assistant"):
+            with st.chat_message("assistant", avatar=CHAT_AVATAR["assistant"]):
                 try:
-                    with st.spinner("🔍 Reviewing the medical records..."):
+                    with st.spinner("Reviewing the medical records..."):
                         result = ask(prompt, st.session_state.index, history, st.session_state.df, selected_patient)
                     answer = result.get("answer") or config.NOT_FOUND
                     sources = result.get("sources") or []
@@ -486,7 +607,7 @@ with tab_chat:
                     st.session_state.messages.append({"role": "assistant", "content": answer, "sources": sources})
                 except Exception:  # noqa: BLE001
                     log.exception("ask() failed")
-                    st.error("❌ Unable to generate an answer right now. Please try again.")
+                    st.error("Unable to generate an answer right now. Please try again.", icon=":material/error:")
 
 # ---- summary ---------------------------------------------------------------
 with tab_summary:
@@ -498,23 +619,23 @@ with tab_summary:
     elif selected_patient is None:
         st.info("Select a specific patient in the sidebar to generate a summary.")
     else:
-        if st.button("Generate summary", type="primary", key="btn_summary"):
+        if st.button("Generate summary", type="primary", key="btn_summary", icon=":material/bolt:"):
             try:
                 with st.spinner("Generating structured summary..."):
                     st.session_state.summaries[selected_patient] = summarize_patient(
                         selected_patient, st.session_state.df, st.session_state.index)
             except Exception:  # noqa: BLE001
                 log.exception("summarize_patient failed")
-                st.error("❌ Unable to generate the summary right now. Please try again.")
+                st.error("Unable to generate the summary right now. Please try again.", icon=":material/error:")
         summary = st.session_state.summaries.get(selected_patient)
         if summary:
             display_summary(summary, selected_patient)
             d1, d2 = st.columns(2)
-            d2.download_button("⬇️ Download summary (.txt)", summary_to_text(summary),
+            d2.download_button("Download summary (.txt)", summary_to_text(summary), icon=":material/download:",
                                file_name=f"summary_{selected_patient}.txt", key="dl_txt", use_container_width=True)
             try:
                 pdf_bytes = build_summary_pdf(summary, selected_patient, lambda t: trend_for(selected_patient, t))
-                d1.download_button("⬇️ Download summary (.pdf)", pdf_bytes, file_name=f"summary_{selected_patient}.pdf",
+                d1.download_button("Download summary (.pdf)", pdf_bytes, file_name=f"summary_{selected_patient}.pdf", icon=":material/download:",
                                    mime="application/pdf", key="dl_pdf", use_container_width=True)
             except Exception:  # noqa: BLE001
                 log.exception("PDF export failed")
@@ -538,7 +659,7 @@ with tab_trends:
         except Exception:  # noqa: BLE001
             log.exception("trend failed")
             td = None
-            st.error("❌ Unable to analyse this trend right now.")
+            st.error("Unable to analyse this trend right now.", icon=":material/error:")
         else:
             if td is None:
                 st.info(f"Not enough repeated {test} readings in this report to draw a trend. "
@@ -547,10 +668,14 @@ with tab_trends:
                 unit = str(td["unit"].iloc[0]) if "unit" in td.columns else ""
                 fig = px.line(td, x="date", y="value", markers=True,
                               labels={"date": "Date", "value": f"{test} ({unit})" if unit else test})
-                fig.update_layout(height=420, margin=dict(l=20, r=20, t=35, b=20), plot_bgcolor="white",
-                                  paper_bgcolor="white", hovermode="x unified")
-                fig.update_traces(line=dict(color="#176b87", width=2.5), marker=dict(size=7, color="#176b87"))
-                st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+                fig.update_layout(height=420, margin=dict(l=20, r=20, t=35, b=20), plot_bgcolor="rgba(0,0,0,0)",
+                                  paper_bgcolor="rgba(0,0,0,0)", hovermode="x unified",
+                                  font=dict(color=PAL["ink"], family="Figtree, sans-serif"))
+                fig.update_xaxes(gridcolor=PAL["line"], linecolor=PAL["line"], zeroline=False)
+                fig.update_yaxes(gridcolor=PAL["line"], linecolor=PAL["line"], zeroline=False)
+                fig.update_traces(line=dict(color=PAL["primary"], width=3),
+                                  marker=dict(size=9, color=PAL["primary"], line=dict(width=2, color=PAL["surface"])))
+                st.plotly_chart(fig, use_container_width=True, theme=None, config={"displayModeBar": False})
                 with st.expander("Data"):
                     st.dataframe(td, hide_index=True)
 
