@@ -1,0 +1,27 @@
+# Medimind theme. Streamlit's built-in menu (top-right ⋮ -> Settings -> Theme)
+# switches between Light, Dark, or "Use system setting".
+[theme]
+base = "light"
+font = "sans serif"
+baseRadius = "0.9rem"
+buttonRadius = "full"
+showSidebarBorder = false
+
+[theme.light]
+primaryColor = "#0E7C7B"
+backgroundColor = "#F3F7F7"
+secondaryBackgroundColor = "#E6EFEF"
+textColor = "#12262B"
+borderColor = "#D5E2E2"
+linkColor = "#0E7C7B"
+
+[theme.dark]
+primaryColor = "#3CC9BE"
+backgroundColor = "#0B1416"
+secondaryBackgroundColor = "#111E21"
+textColor = "#E4EFEE"
+borderColor = "#223539"
+linkColor = "#5ED8CE"
+
+[server]
+headless = true
